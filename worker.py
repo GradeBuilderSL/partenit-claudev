@@ -345,6 +345,54 @@ def run_setup_job(job: dict) -> None:
                 from telegram_notifier import _send
                 _send(msg)
 
+        # Also check prerequisite stages: if their deps are all Done,
+        # trigger them too (handles restart recovery)
+        all_subtasks = jira.get_subtasks(issue_key)
+        stage_map = {}
+        for sub in all_subtasks:
+            s = get_stage(sub["labels"])
+            if s:
+                stage_map[s] = sub
+
+        for stage, prereqs in STAGE_PREREQUISITES.items():
+            if not prereqs:
+                continue  # already handled above
+            sub = stage_map.get(stage)
+            if not sub:
+                continue
+            # Skip if already done/in review
+            if (_status_matches(sub["status"], STATUS_DONE)
+                    or _status_matches(sub["status"], STATUS_IN_REVIEW)):
+                continue
+            # Check if all prerequisites are done
+            all_done = all(
+                _status_matches(stage_map.get(p, {}).get("status", ""), STATUS_DONE)
+                for p in prereqs
+            )
+            if not all_done:
+                continue
+            # Prerequisites met — check if needs (re)launch
+            if _status_matches(sub["status"], STATUS_IN_PROGRESS):
+                from main import jobs as all_jobs
+                has_active = any(
+                    j["issue_key"] == sub["key"]
+                    and j["status"] in ("queued", "running")
+                    for j in all_jobs.values()
+                )
+                if has_active:
+                    continue
+                logger.info("[%s] re-launching dead stage %s (%s)",
+                            issue_key, stage, sub["key"])
+                _relaunch_subtask(sub, issue_key, stage)
+            else:
+                # To Do → start
+                logger.info("[%s] prerequisites met for %s, triggering",
+                            issue_key, stage)
+                ok = jira.transition(sub["key"], STATUS_IN_PROGRESS)
+                if ok:
+                    logger.info("[%s] auto-started stage %s (%s)",
+                                issue_key, stage, sub["key"])
+
     except Exception as e:
         logger.error("[%s] setup FAIL: %s", issue_key, e)
         try:

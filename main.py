@@ -264,10 +264,15 @@ async def webhook_jira(request: Request, secret: str = "") -> Dict[str, Any]:
     else:
         stage = None
 
-    # Idempotency
+    # Idempotency: skip if already processing or recently completed (< 30s)
+    import time as _time
     for j in jobs.values():
         if j["issue_key"] == issue_key and j["status"] in ("queued", "running"):
             return {"skipped": True, "reason": f"already processing {issue_key}"}
+    # Also skip if this parent is already active in pipeline
+    # (prevents self-queueing from label-update webhooks)
+    if not is_subtask and stage is None and issue_key in active_pipelines:
+        return {"skipped": True, "reason": f"pipeline {issue_key} already active"}
 
     # Extract parent key for sub-tasks
     parent_key = issue_key
