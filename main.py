@@ -268,20 +268,37 @@ async def webhook_jira(request: Request, secret: str = "") -> Dict[str, Any]:
     if is_merge and is_subtask:
         return {"skipped": True, "reason": "merge trigger ignored for sub-tasks"}
 
-    # Subtask moved to Done → trigger dependent stages
+    # Subtask moved to Done → trigger dependent stages + check all done
     if is_subtask and is_done:
         stage = get_stage(labels)
         if stage:
             parent_ref = fields.get("parent", {})
             parent_key = parent_ref.get("key", "")
             if parent_key:
-                from dependency_tracker import trigger_next_stages
+                from dependency_tracker import trigger_next_stages, all_stages_done
                 from jira_client import JiraClient
+                from telegram_notifier import notify_all_done
                 _jira = JiraClient()
                 triggered = trigger_next_stages(parent_key, stage, _jira)
                 logger.info("Subtask %s Done → triggered: %s", issue_key, triggered)
+
+                # Check if ALL stages are done → notify
+                if not triggered and all_stages_done(parent_key, _jira):
+                    _jira.add_comment(
+                        parent_key,
+                        "🎉 Все этапы pipeline завершены!\n"
+                        "sys-analysis ✅ | architecture ✅ | "
+                        "development ✅ | testing ✅\n"
+                        "Задача готова к ревью. Переведи в "
+                        "'Ready to Merge' для авто-мерджа.",
+                    )
+                    jira_domain = f"{JIRA_DOMAIN}.atlassian.net"
+                    notify_all_done(parent_key, jira_domain)
+                    logger.info("All stages done for %s", parent_key)
+
                 return {"triggered": triggered, "issue_key": issue_key,
-                        "parent_key": parent_key}
+                        "parent_key": parent_key,
+                        "all_done": not triggered and all_stages_done(parent_key, _jira)}
         return {"skipped": True, "reason": "subtask Done, no stage to trigger"}
 
     if is_subtask:
