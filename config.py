@@ -24,6 +24,7 @@ GITHUB_REPO = os.environ["GITHUB_REPO"]
 TRIGGER_STATUS = os.environ.get("TRIGGER_STATUS", "In Progress")
 STAGE_BRANCH = os.environ.get("STAGE_BRANCH", "stage")
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", 3))
+MAX_CONCURRENT_PIPELINES = int(os.environ.get("MAX_CONCURRENT_PIPELINES", 1))
 JOB_TIMEOUT_MINUTES = int(os.environ.get("JOB_TIMEOUT_MINUTES", 60))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", 3))
 RETRY_DELAY_MINUTES = int(os.environ.get("RETRY_DELAY_MINUTES", 10))
