@@ -5,6 +5,12 @@ import time
 import logging
 
 from orchestrator import analyze_result, suggest_labels
+from telegram_notifier import (
+    notify_artifact_done,
+    notify_pr_created,
+    notify_all_done,
+    notify_error,
+)
 from jira_client import JiraClient
 from github_client import GitHubClient
 from dependency_tracker import (
@@ -236,6 +242,8 @@ def run_artifact_stage(job: dict) -> None:
 
         jira.transition(issue_key, STATUS_DONE)
         logger.info("[%s] stage %s done (%ds)", issue_key, stage, duration)
+        notify_artifact_done(stage, issue_key, parent_key,
+                             job.get("jira_domain", ""), duration)
 
         triggered = trigger_next_stages(parent_key, stage, jira)
         if triggered:
@@ -246,6 +254,7 @@ def run_artifact_stage(job: dict) -> None:
 
     except Exception as e:
         logger.error("[%s] artifact stage FAIL: %s", issue_key, e)
+        notify_error(issue_key, stage, str(e), job.get("jira_domain", ""))
         try:
             jira.add_comment(
                 issue_key,
@@ -348,6 +357,8 @@ def run_code_stage(job: dict) -> None:
                 body=pr_body,
             )
             github.add_labels(pr["number"], ["automated", "claude-code", stage])
+            notify_pr_created(issue_key, parent_key, pr["html_url"],
+                              job.get("jira_domain", ""), len(changed))
 
             concerns = (
                 "\n⚠️ " + "; ".join(analysis["concerns"])
@@ -383,6 +394,7 @@ def run_code_stage(job: dict) -> None:
                 "sys-analysis ✅ | architecture ✅ | development ✅ | testing ✅\n"
                 "Задача готова к ревью.",
             )
+            notify_all_done(parent_key, job.get("jira_domain", ""))
 
         triggered = trigger_next_stages(parent_key, stage, jira)
         if triggered:
@@ -393,6 +405,7 @@ def run_code_stage(job: dict) -> None:
 
     except Exception as e:
         logger.error("[%s] code stage FAIL: %s", issue_key, e)
+        notify_error(issue_key, stage, str(e), job.get("jira_domain", ""))
         try:
             jira.add_comment(
                 issue_key,
