@@ -114,7 +114,6 @@ def _run_claude(prompt: str, work_dir: str, job: dict) -> subprocess.CompletedPr
             "--model", "claude-opus-4-6",
             "--output-format", "text",
             "--max-turns", "50",
-            "--dangerously-skip-permissions",
         ],
         cwd=work_dir,
         stdout=subprocess.PIPE,

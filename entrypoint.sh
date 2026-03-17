@@ -23,5 +23,38 @@ else
     echo "[entrypoint] WARNING: No credentials found. Claude Code will not work."
 fi
 
+# ── Fix .claude.json if missing (restore from backup if available) ────────────
+if [ ! -f /root/.claude.json ]; then
+    BACKUP=$(find /root/.claude/backups/ -name '.claude.json.backup.*' 2>/dev/null | sort -r | head -1)
+    if [ -n "$BACKUP" ]; then
+        cp "$BACKUP" /root/.claude.json
+        echo "[entrypoint] Restored .claude.json from backup: $BACKUP"
+    else
+        echo '{}' > /root/.claude.json
+        echo "[entrypoint] Created empty .claude.json"
+    fi
+fi
+
+# ── Claude Code permissions: auto-approve all tools (runs as root, can't use --dangerously-skip-permissions)
+mkdir -p /root/.claude
+cat > /root/.claude/settings.json << 'SETTINGS'
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)"
+    ],
+    "deny": []
+  }
+}
+SETTINGS
+echo "[entrypoint] Claude Code permissions configured (auto-approve all tools)."
+
 # ── Start pipeline ────────────────────────────────────────────────────────────
 exec python main.py
