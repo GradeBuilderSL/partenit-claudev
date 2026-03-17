@@ -36,17 +36,21 @@ class JiraClient:
             timeout=10,
         )
         r.raise_for_status()
-        for t in r.json().get("transitions", []):
-            if t["name"].lower() == target.lower():
+        transitions = r.json().get("transitions", [])
+        # Match by target status name (robust across locales) or transition name
+        for t in transitions:
+            to_name = t.get("to", {}).get("name", "")
+            if to_name.lower() == target.lower() or t["name"].lower() == target.lower():
                 httpx.post(
                     f"{self.base_url}/rest/api/3/issue/{key}/transitions",
                     headers=self.headers,
                     json={"transition": {"id": t["id"]}},
                     timeout=10,
                 )
-                logger.info("%s → %s", key, target)
+                logger.info("%s → %s (via transition '%s')", key, target, t["name"])
                 return True
-        logger.warning("Transition '%s' not found for %s", target, key)
+        logger.warning("Transition to '%s' not found for %s, available: %s",
+                       target, key, [t.get("to", {}).get("name") for t in transitions])
         return False
 
     def add_comment(self, key: str, text: str) -> bool:
