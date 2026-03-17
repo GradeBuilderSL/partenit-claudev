@@ -4,7 +4,7 @@ import subprocess
 import time
 import logging
 
-from orchestrator import analyze_result, suggest_labels
+from orchestrator import analyze_result, suggest_labels, run_deepseek_artifact
 from jira_client import JiraClient
 from github_client import GitHubClient
 from dependency_tracker import (
@@ -53,8 +53,14 @@ def _clone_repo(work_dir: str, branch_name: str) -> None:
 
 
 def _run_claude(prompt: str, work_dir: str) -> subprocess.CompletedProcess:
+    """Run Claude Code Opus — used only for development and testing stages."""
     return subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text", "--max-turns", "50"],
+        [
+            "claude", "-p", prompt,
+            "--model", "claude-opus-4-6",
+            "--output-format", "text",
+            "--max-turns", "50",
+        ],
         cwd=work_dir,
         capture_output=True,
         text=True,
@@ -72,15 +78,6 @@ def _git_changed_files(work_dir: str) -> list[str]:
         cwd=work_dir, capture_output=True, text=True,
     )
     return [f for f in (diff.stdout + untracked.stdout).strip().split("\n") if f]
-
-
-def _read_artifact_file(work_dir: str, filename: str) -> str:
-    """Read generated artifact file (SYSTEM_ANALYSIS.md etc.) if it exists."""
-    path = os.path.join(work_dir, filename)
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            return fh.read()
-    return ""
 
 
 # ── Setup job: create pipeline subtasks for a parent task ────────────────────
@@ -172,22 +169,20 @@ _ARTIFACT_FILENAMES = {
 
 
 def run_artifact_stage(job: dict) -> None:
-    """Run sys-analysis or architecture stage.
+    """Run sys-analysis or architecture stage via DeepSeek (no git clone).
 
-    Claude Code writes a markdown file. Pipeline reads it, posts to Jira
-    as a comment (so dependency_tracker can collect it later), and marks Done.
+    DeepSeek generates the markdown artifact directly from the Jira description.
+    Result is posted as a Jira comment so dependency_tracker can collect it.
     """
     issue_key = job["issue_key"]
     parent_key = job["parent_key"]
     stage = job["stage"]
     job_id = job["job_id"]
-    work_dir = f"/tmp/pipeline-work/{job_id}"
 
     try:
         jira.transition(issue_key, "In Progress")
-        jira.add_comment(issue_key, f"🤖 Этап {stage} начат. Job: {job_id}")
+        jira.add_comment(issue_key, f"🤖 Этап {stage} начат (DeepSeek). Job: {job_id}")
 
-        # Auto-tag issue and parent with domain/service labels
         auto_labels = suggest_labels(job["summary"], job.get("description_text", ""))
         if auto_labels:
             jira.add_labels(issue_key, auto_labels)
@@ -195,55 +190,28 @@ def run_artifact_stage(job: dict) -> None:
                 jira.add_labels(parent_key, auto_labels)
 
         artifact_context = collect_artifact_context(parent_key, jira)
-        prompt = build_stage_prompt(job, artifact_context)
-
-        logger.info("[%s] Cloning for artifact stage %s", issue_key, stage)
-        os.makedirs(work_dir, exist_ok=True)
-        _clone_repo(work_dir, f"analysis/{issue_key.lower()}")
 
         start = time.time()
-        logger.info("[%s] Running Claude Code (stage=%s)", issue_key, stage)
-        result = _run_claude(prompt, work_dir)
+        logger.info("[%s] DeepSeek: generating %s artifact", issue_key, stage)
+        artifact_text = run_deepseek_artifact(stage, job, artifact_context)
         duration = int(time.time() - start)
-
-        if result.returncode != 0:
-            raise Exception(
-                f"Claude Code rc={result.returncode}: {result.stderr[:500]}"
-            )
+        logger.info("[%s] DeepSeek done: %ds, %d chars", issue_key, duration, len(artifact_text))
 
         artifact_filename = _ARTIFACT_FILENAMES.get(stage, f"{stage.upper()}.md")
-        artifact_text = _read_artifact_file(work_dir, artifact_filename)
-
-        if not artifact_text:
-            artifact_text = (
-                result.stdout.strip() or "Артефакт не создан — проверить вручную."
-            )
-            logger.warning(
-                "[%s] Artifact file %s not found, using stdout",
-                issue_key, artifact_filename,
-            )
-
         jira_domain = job.get("jira_domain", "")
         parent_url = f"https://{jira_domain}/browse/{parent_key}"
-        github_url = (
-            f"https://github.com/{GITHUB_REPO}/blob/main/{artifact_filename}"
-        )
-        link_line = (
-            f"📄 **Артефакт [{stage}]:** [{artifact_filename}]({github_url})  \n"
-            f"🔗 Задача: [{parent_key}]({parent_url})\n\n"
-        )
 
         jira.add_comment(
             issue_key,
-            f"{link_line}"
+            f"🔗 Задача: [{parent_key}]({parent_url})\n\n"
             f"## Результат этапа: {stage}\n\n{artifact_text[:24000]}\n\n"
             f"---\n⏱ {duration // 60}м {duration % 60}с | Job: {job_id}",
         )
 
         jira.add_comment(
             parent_key,
-            f"✅ Этап **{stage}** завершён.\n"
-            f"📄 Артефакт: [{artifact_filename}]({github_url})\n"
+            f"✅ Этап **{stage}** завершён (DeepSeek).\n"
+            f"📄 Артефакт: {artifact_filename}\n"
             f"⏱ {duration // 60}м {duration % 60}с",
         )
 
@@ -266,8 +234,6 @@ def run_artifact_stage(job: dict) -> None:
             )
         except Exception:
             pass
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # ── Code stage (development, testing) ─────────────────────────────────────────

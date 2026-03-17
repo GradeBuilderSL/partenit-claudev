@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 
 import httpx
 
@@ -77,6 +76,48 @@ def classify_issue(summary: str, description: str, labels: list) -> dict:
             "needs_tests": True,
             "safety_relevant": False,
         }
+
+
+def run_deepseek_artifact(stage: str, issue: dict, artifact_context: dict) -> str:
+    """Run sys-analysis or architecture entirely via DeepSeek — no git clone needed.
+
+    Returns the full markdown artifact text to be posted to Jira.
+    """
+    from prompts import build_stage_prompt
+
+    prompt = build_stage_prompt(issue, artifact_context)
+
+    jira_domain = issue.get("jira_domain", "")
+    parent_url = f"https://{jira_domain}/browse/{issue['parent_key']}" if jira_domain else issue['parent_key']
+    subtask_url = f"https://{jira_domain}/browse/{issue['key']}" if jira_domain else issue['key']
+
+    _STAGE_TITLES = {
+        "sys-analysis": "Системный анализ",
+        "architecture": "Архитектурное решение",
+    }
+    title = _STAGE_TITLES.get(stage, stage)
+
+    header = (
+        f"# {title}: [{issue['parent_key']}]({parent_url}) — {issue['summary']}\n\n"
+        f"> **Jira:** [{issue['parent_key']}]({parent_url}) · "
+        f"Подзадача: [{issue['key']}]({subtask_url})  \n"
+        f"> **Этап:** {stage}  \n"
+        f"> Сгенерировано автоматически Trust Layer Pipeline (DeepSeek)\n\n"
+        "---\n\n"
+    )
+
+    result = _call_deepseek(
+        system=(
+            "Ты старший архитектор и технический аналитик проекта Trust Layer — "
+            "safety middleware для роботов (Python, ~50 микросервисов).\n"
+            "Отвечай только на русском языке. Формат: markdown.\n"
+            "Не добавляй заголовок файла — он уже есть. Начни сразу с первого раздела."
+        ),
+        user=prompt,
+        max_tokens=4000,
+    )
+
+    return header + result
 
 
 def suggest_labels(summary: str, description: str) -> list[str]:
@@ -214,4 +255,3 @@ def analyze_result(claude_output: str, changed_files: list) -> dict:
             "tests_status": "unknown",
             "concerns": [],
         }
-
