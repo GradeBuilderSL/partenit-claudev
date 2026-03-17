@@ -2,7 +2,7 @@ import logging
 
 import httpx
 
-from config import GITHUB_TOKEN, GITHUB_REPO
+from config import GITHUB_TOKEN_TRUST_LAYER as GITHUB_TOKEN, GITHUB_REPO
 
 logger = logging.getLogger("pipeline.github")
 

@@ -14,7 +14,10 @@ JIRA_API_TOKEN = os.environ["JIRA_API_TOKEN"]
 JIRA_PROJECT_KEY = os.environ.get("JIRA_PROJECT_KEY", "TRUST")
 
 # GitHub
-GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]            # trust-layer-pipeline repo
+GITHUB_TOKEN_TRUST_LAYER = os.environ.get(           # trust-layer repo (clone + PR)
+    "GITHUB_TOKEN_TRUST_LAYER", os.environ["GITHUB_TOKEN"]
+)
 GITHUB_REPO = os.environ["GITHUB_REPO"]
 
 # Pipeline

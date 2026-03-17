@@ -25,7 +25,7 @@ from dependency_tracker import (
 )
 from prompts import build_stage_prompt
 from config import (
-    GITHUB_TOKEN,
+    GITHUB_TOKEN_TRUST_LAYER,
     GITHUB_REPO,
     STAGE_BRANCH,
     JOB_TIMEOUT_MINUTES,
@@ -49,7 +49,7 @@ github = GitHubClient()
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _clone_repo(work_dir: str, branch_name: str) -> None:
-    repo_url = f"https://x-access-token:{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+    repo_url = f"https://x-access-token:{GITHUB_TOKEN_TRUST_LAYER}@github.com/{GITHUB_REPO}.git"
     subprocess.run(
         ["git", "clone", "--depth=1", repo_url, work_dir],
         check=True,
