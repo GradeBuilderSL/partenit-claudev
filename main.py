@@ -96,12 +96,13 @@ async def webhook_jira(request: Request, secret: str = "") -> Dict[str, Any]:
     if issue_type not in ALLOWED_TYPES:
         return {"skipped": True, "reason": f"type={issue_type}"}
 
-    # Merge jobs: only parent tasks, skip sub-tasks
-    if status_name == STATUS_MERGE and issue_type in ("Sub-task", "Подзадача"):
-        return {"skipped": True, "reason": "merge trigger ignored for sub-tasks"}
-
     labels = fields.get("labels", [])
-    is_subtask = issue_type in ("Sub-task", "Подзадача")
+    # Detect sub-tasks by parent field (reliable across all Jira locales)
+    is_subtask = bool(fields.get("parent")) or issue_type in ("Sub-task", "Подзадача")
+
+    # Merge jobs: only parent tasks, skip sub-tasks
+    if status_name == STATUS_MERGE and is_subtask:
+        return {"skipped": True, "reason": "merge trigger ignored for sub-tasks"}
 
     if is_subtask:
         # Sub-tasks: must have a pipeline stage label to be processed
