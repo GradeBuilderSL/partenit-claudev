@@ -181,6 +181,54 @@ def _git_changed_files(work_dir: str) -> list[str]:
     return [f for f in (diff.stdout + untracked.stdout).strip().split("\n") if f]
 
 
+def _relaunch_subtask(sub: dict, parent_key: str, stage: str) -> None:
+    """Re-launch a dead subtask (In Progress but no active job).
+
+    Creates a new job directly without waiting for webhook.
+    """
+    import uuid
+    import time as _time
+
+    sub_key = sub["key"]
+    job_id = str(uuid.uuid4())[:8]
+
+    # Fetch full subtask info for the job dict
+    try:
+        full = jira.get_issue(sub_key)
+        full_fields = full.get("fields", {})
+    except Exception:
+        full_fields = {}
+
+    parent_ref = full_fields.get("parent", {})
+    job = {
+        "job_id": job_id,
+        "issue_key": sub_key,
+        "key": sub_key,
+        "parent_key": parent_ref.get("key", parent_key),
+        "summary": full_fields.get("summary", sub.get("summary", "")),
+        "description": full_fields.get("description", {}),
+        "description_text": "",
+        "issue_type": full_fields.get("issuetype", {}).get("name", "Sub-task"),
+        "stage": stage,
+        "trigger": "In Progress",
+        "jira_domain": f"{os.environ.get('JIRA_DOMAIN', '')}.atlassian.net",
+        "priority": full_fields.get("priority", {}).get("name", "Medium"),
+        "labels": full_fields.get("labels", sub.get("labels", [])),
+        "components": [
+            c.get("name", "") if isinstance(c, dict) else c
+            for c in full_fields.get("components", [])
+        ],
+        "status": "queued",
+        "created": _time.time(),
+    }
+
+    from main import _launch_job, active_pipelines
+    # Ensure parent is in active pipelines
+    active_pipelines.add(parent_key)
+    _launch_job(job)
+    logger.info("[%s] re-launched dead stage %s as job %s", parent_key, stage, job_id)
+
+
 # ── Setup job: create pipeline subtasks for a parent task ────────────────────
 
 _STAGE_SUMMARIES = {
@@ -258,13 +306,34 @@ def run_setup_job(job: dict) -> None:
             stage = get_stage(sub["labels"])
             if not stage or STAGE_PREREQUISITES.get(stage):
                 continue
-            # Don't re-trigger subtasks that are already running or finished
             sub_status = sub.get("status", "").lower()
-            if sub_status in ("in progress", "done", "in review",
-                              "в работе", "готово", "в процессе проверки"):
-                logger.info("[%s] stage %s (%s) already '%s', skipping auto-start",
+            from jira_client import _status_matches
+
+            # Already done or in review → skip
+            if (_status_matches(sub["status"], STATUS_DONE)
+                    or _status_matches(sub["status"], STATUS_IN_REVIEW)):
+                logger.info("[%s] stage %s (%s) already '%s', skipping",
                             issue_key, stage, sub["key"], sub["status"])
                 continue
+
+            # "In Progress" but no active job → dead stage, re-launch directly
+            if _status_matches(sub["status"], STATUS_IN_PROGRESS):
+                from main import jobs
+                has_active_job = any(
+                    j["issue_key"] == sub["key"] and j["status"] in ("queued", "running")
+                    for j in jobs.values()
+                )
+                if has_active_job:
+                    logger.info("[%s] stage %s (%s) has active job, skipping",
+                                issue_key, stage, sub["key"])
+                    continue
+                # Dead stage: already In Progress but no job running — re-launch
+                logger.info("[%s] stage %s (%s) is '%s' with no active job, re-launching",
+                            issue_key, stage, sub["key"], sub["status"])
+                _relaunch_subtask(sub, issue_key, stage)
+                continue
+
+            # To Do → transition to In Progress (webhook will trigger job)
             ok = jira.transition(sub["key"], STATUS_IN_PROGRESS)
             if ok:
                 logger.info("[%s] auto-started stage %s (%s)", issue_key, stage, sub["key"])
