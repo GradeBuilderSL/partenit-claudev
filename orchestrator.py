@@ -139,8 +139,8 @@ def build_claude_prompt(issue: dict, classification: dict) -> str:
     if classification.get("safety_relevant"):
         safety_warning = (
             "## ⚠️ SAFETY-RELEVANT\n"
-            "Read STEERING.md before starting. "
-            "L1/L2a — no ML. Fail-closed. audit_ref required.\n\n"
+            "Read STEERING.md before starting (if it exists). "
+            "Pay extra attention to error handling. Prefer fail-safe defaults.\n\n"
         )
 
     type_instructions = {

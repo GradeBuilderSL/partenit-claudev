@@ -54,13 +54,14 @@ def _pre_flight(stage: str, parent_key: str = "") -> str:
     """Files to read BEFORE starting any work."""
     base_files = (
         "## Mandatory reading before starting\n\n"
-        "Read these files IN FULL before writing anything:\n\n"
-        "1. **CLAUDE.md** — project rules, absolute prohibitions, "
-        "priority order\n"
-        "2. **ARCHITECTURE.md** — service map, ports, "
-        "libraries, data flows\n"
-        "3. **STEERING.md** — invariants, layer boundaries, "
-        "what MUST NOT be violated\n"
+        "Read these files IN FULL before writing anything "
+        "(if they exist in the repo):\n\n"
+        "1. **CLAUDE.md** — project rules, conventions, "
+        "priorities for AI assistants\n"
+        "2. **ARCHITECTURE.md** — project structure, components, "
+        "dependencies, data flows\n"
+        "3. **STEERING.md** — design principles, constraints, "
+        "things that must not be changed\n"
     )
 
     if stage in ("architecture", "development", "testing"):
@@ -82,38 +83,28 @@ def _pre_flight(stage: str, parent_key: str = "") -> str:
 
 
 def _coding_standards() -> str:
-    """Coding standards that apply to ALL stages."""
+    """Coding standards that apply to ALL stages.
+
+    NOTE: Customize these to match your project's conventions.
+    The rules below are sensible defaults — adjust as needed.
+    """
     return (
         "## Coding standards\n\n"
         "### Architecture\n"
         "- **No code duplication.** Before creating a new function/class, "
-        "check if one already exists in `libs/` or `services/`. "
+        "search the codebase for existing implementations. "
         "Use `Grep` to search.\n"
         "- **No unnecessary abstractions.** "
-        "Three identical lines are better than a premature abstraction.\n"
-        "- **Libs = pure Python**, no HTTP inside libs. "
-        "HTTP only in services.\n"
-        "- **Single-file services** (~300-500 lines). If larger — "
-        "split by responsibility.\n"
-        "- **Do not mix layers** L1/L2a/L2b/L3. Each layer is "
-        "a separate module.\n\n"
+        "Three similar lines are better than a premature abstraction.\n"
+        "- **Follow existing patterns.** Look at how similar features "
+        "are implemented in the project and stay consistent.\n"
+        "- **Keep files focused.** One module = one responsibility. "
+        "Split large files by concern.\n\n"
         "### Style\n"
-        "- Python: `http.server.BaseHTTPRequestHandler` for new "
-        "services (unless already on FastAPI).\n"
-        "- Logging: `logger = logging.getLogger('service_name')`, "
-        "NOT print().\n"
-        "- All services: `GET /health` → JSON.\n"
-        "- sys.path.insert for libs: "
-        "`sys.path.insert(0, os.path.join(os.path.dirname(__file__), "
-        "'..', '..', 'libs'))`\n"
+        "- Follow the coding style already used in the project.\n"
+        "- Logging: use the project's logging pattern, NOT print().\n"
         "- Type hints for public functions.\n"
         "- Docstrings only for non-obvious logic.\n\n"
-        "### Safety (MUST NOT violate)\n"
-        "- L1/L2a — deterministic code only. No ML, LLM, "
-        "network I/O.\n"
-        "- Safety is binary: ALLOW / DENY. Never score-based.\n"
-        "- Error → DENY / SAFE_FALLBACK. Fail-open is forbidden.\n"
-        "- Every reject → ReasonCode + audit_ref.\n\n"
         "### What NOT to do\n"
         "- Do NOT refactor code unrelated to the task.\n"
         "- Do NOT add comments/docstrings to code you didn't change.\n"
@@ -128,12 +119,10 @@ def _post_flight() -> str:
     """Checklist AFTER completing work."""
     return (
         "## After completing work\n\n"
-        "1. If you added/changed/removed a service — **update "
-        "ARCHITECTURE.md** (section 3 + section 6).\n"
-        "2. If you added a new port — check it doesn't conflict "
-        "(see ARCHITECTURE.md).\n"
-        "3. If you noticed tech debt — add to TECH_DEBT.md.\n"
-        "4. If unclear → leave a TODO with explanation, "
+        "1. If you changed the project structure or added a component "
+        "— **update ARCHITECTURE.md** (if it exists).\n"
+        "2. If you noticed tech debt — add to TECH_DEBT.md.\n"
+        "3. If unclear → leave a TODO with explanation, "
         "don't guess.\n\n"
     )
 
@@ -195,10 +184,10 @@ def build_sys_analysis_prompt(issue: dict) -> str:
         "1. **Problem summary** — what exactly is required\n"
         "2. **Current state of the code** — how it works now "
         "(read real code, don't guess!)\n"
-        "3. **Affected components** — list of services/libraries "
+        "3. **Affected components** — list of modules/packages "
         "with file paths\n"
         "4. **Dependencies** — upstream/downstream, who calls whom\n"
-        "5. **Existing utilities** — what's already in libs/ that can "
+        "5. **Existing utilities** — what's already in the codebase that can "
         "be reused (check with Grep!)\n"
         "6. **Risks** — potential issues during implementation\n"
         "7. **Edge cases** — non-standard situations\n"
@@ -251,8 +240,8 @@ def build_architecture_prompt(issue: dict, sys_analysis: str = "") -> str:
         "1. **Context** — briefly, why we are making this change\n"
         "2. **Decision** — concrete architectural decision "
         "with justification. Specify WHICH files to change and HOW.\n"
-        "3. **Reuse** — what existing code to use "
-        "(libs/, existing helpers). Check with Grep!\n"
+        "3. **Reuse** — what existing code to use. "
+        "Check the codebase with Grep!\n"
         "4. **Alternatives** — what was considered and why rejected\n"
         "5. **API contract** — new/changed endpoints, "
         "data formats\n"
@@ -261,11 +250,10 @@ def build_architecture_prompt(issue: dict, sys_analysis: str = "") -> str:
         "(what to do in the dev stage)\n"
         "8. **Success metrics** — how to know the task is done\n\n"
         "Important:\n"
-        "- Follow project principles from CLAUDE.md and STEERING.md\n"
-        "- L1/L2a — deterministic, synchronous, fail-closed\n"
-        "- Do not mix layers L1, L2a, L2b, L3\n"
+        "- Follow project principles from CLAUDE.md and STEERING.md "
+        "(if they exist)\n"
         "- Do not duplicate existing functionality — "
-        "check libs/ before proposing new code\n\n"
+        "search the codebase before proposing new code\n\n"
     ).strip()
 
 
@@ -297,9 +285,9 @@ def build_development_prompt(
     if issue.get("safety_relevant"):
         safety_warning = (
             "## SAFETY-RELEVANT\n"
-            "Read STEERING.md before starting. "
-            "L1/L2a — no ML, no network I/O. Fail-closed. "
-            "audit_ref required.\n\n"
+            "Read STEERING.md before starting (if it exists). "
+            "Pay extra attention to error handling and edge cases. "
+            "Prefer fail-safe defaults.\n\n"
         )
 
     return (
@@ -318,8 +306,8 @@ def build_development_prompt(
         "2. Read ARCHITECTURE.md — find related services "
         "and libraries.\n"
         "3. **Find existing code** to reuse:\n"
-        "   - Grep for keywords in `libs/`\n"
-        "   - Grep for similar functions in `services/`\n"
+        "   - Grep for keywords across the codebase\n"
+        "   - Look for similar functions in existing modules\n"
         "   - Do NOT create duplicates!\n"
         "4. Implement with minimal changes.\n"
         "5. Write basic tests (pytest) for the new code.\n"
@@ -371,7 +359,7 @@ def build_testing_prompt(
         "2. **Edge cases** — boundary values, empty inputs\n"
         "3. **Error cases** — invalid input data\n"
         "4. **Safety invariants** — if safety-relevant: "
-        "tests for fail-closed behavior\n\n"
+        "tests for fail-safe behavior\n\n"
         "### Test rules\n"
         "- pytest, NOT unittest\n"
         "- Deterministic (no time.sleep, no random without seed)\n"

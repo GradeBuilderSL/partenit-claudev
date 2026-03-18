@@ -354,6 +354,24 @@ See [.env.example](.env.example) for the full list including all status name ove
 
 ---
 
+## Best practice: project context files
+
+Claudev works best when your target repository contains files that describe the project for AI. Without them, Claude Code still works — but with them, it writes code that actually fits your architecture.
+
+### Recommended files
+
+| File | Purpose |
+|------|---------|
+| **CLAUDE.md** | Rules and conventions for AI assistants: what to do, what to avoid, priorities. Think of it as onboarding docs for your AI developer. |
+| **ARCHITECTURE.md** | Project structure: components, how they connect, data flows, tech stack. The more detail, the better Claude understands where to make changes. |
+| **STEERING.md** | Design principles and hard constraints: things that must not be changed, invariants, boundaries between modules. |
+
+These files are read by Claude Code **before every stage** — they're the difference between "generic code that kind of works" and "code that fits your project perfectly."
+
+> For detailed recommendations on writing effective CLAUDE.md and ARCHITECTURE.md files, see our guide at [partenit.io](https://partenit.io).
+
+---
+
 ## Customization
 
 ### Label taxonomy
@@ -362,7 +380,7 @@ Edit [orchestrator.py](orchestrator.py) → `suggest_labels()` to define your pr
 
 ### Prompts
 
-Edit [prompts.py](prompts.py) to customize what Claude Code does at each stage. The prompts reference project-specific files like `CLAUDE.md`, `ARCHITECTURE.md`, and `STEERING.md` — create these in your target repo for best results.
+Edit [prompts.py](prompts.py) to customize what Claude Code does at each stage. The coding standards, post-flight checklist, and stage instructions are all configurable.
 
 ### Multi-repo support
 
