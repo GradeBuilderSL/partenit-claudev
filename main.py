@@ -199,7 +199,12 @@ def _run_with_tracking(job: Dict[str, Any]) -> None:
 
 
 def _check_pipeline_slot_release(parent_key: str) -> None:
-    """Release pipeline slot if no more active jobs for this parent."""
+    """Release pipeline slot when all stages are done.
+
+    Uses all_stages_done() instead of just checking active jobs,
+    to avoid race conditions where a webhook for the next stage
+    hasn't arrived yet but no jobs are running.
+    """
     if parent_key not in active_pipelines:
         return
     # Check if any jobs for this parent are still running
@@ -207,7 +212,16 @@ def _check_pipeline_slot_release(parent_key: str) -> None:
         if (j.get("parent_key", j["issue_key"]) == parent_key
                 and j["status"] in ("queued", "running")):
             return  # still has active work
-    # No more active jobs — release the slot
+    # No active jobs — check if all stages are truly done
+    try:
+        from dependency_tracker import all_stages_done
+        from jira_client import JiraClient
+        if not all_stages_done(parent_key, JiraClient()):
+            logger.debug("No active jobs for %s but not all stages done, keeping slot", parent_key)
+            return  # stages pending — don't release yet
+    except Exception:
+        pass  # if check fails, fall through to release
+    # All stages done (or no stages) — release the slot
     _pipeline_finished(parent_key)
 
 
@@ -276,6 +290,17 @@ async def webhook_jira(request: Request, secret: str = "") -> Dict[str, Any]:
             parent_ref = fields.get("parent", {})
             parent_key = parent_ref.get("key", "")
             if parent_key:
+                # Skip if parent still has active jobs — stage handler will trigger next
+                has_active = any(
+                    j.get("parent_key", j["issue_key"]) == parent_key
+                    and j["status"] in ("queued", "running")
+                    for j in jobs.values()
+                )
+                if has_active:
+                    logger.info("Subtask %s Done but parent %s has active jobs, skipping webhook trigger",
+                                issue_key, parent_key)
+                    return {"skipped": True, "reason": "parent has active jobs, stage handler will trigger"}
+
                 from dependency_tracker import trigger_next_stages, all_stages_done
                 from jira_client import JiraClient
                 from telegram_notifier import notify_all_done
@@ -401,6 +426,82 @@ async def webhook_jira(request: Request, secret: str = "") -> Dict[str, Any]:
     # 6. Launch worker
     _launch_job(job)
     return {"accepted": True, "job_id": job_id, "issue_key": issue_key}
+
+
+# ── Startup recovery after redeploy ───────────────────────────────────────────
+
+@app.on_event("startup")
+def _startup_recovery() -> None:
+    """Recover stuck pipelines after a redeploy.
+
+    Scans Jira for parent tasks in 'In Progress' status, checks their
+    subtasks, and re-triggers any stuck stages. This handles the case
+    where a redeploy kills all in-memory jobs.
+    """
+    from config import JIRA_PROJECT_KEY, TRIGGER_STATUS
+    try:
+        from jira_client import JiraClient
+        jira = JiraClient()
+
+        # Search for in-progress tasks in the project
+        import httpx
+        r = httpx.get(
+            f"{jira.base_url}/rest/api/3/search",
+            headers=jira.headers,
+            params={
+                "jql": f"project = {JIRA_PROJECT_KEY} AND status = \"{TRIGGER_STATUS}\"",
+                "maxResults": 10,
+                "fields": "summary,status,subtasks",
+            },
+            timeout=15,
+        )
+        if not r.is_success:
+            logger.warning("[startup] Jira search failed: %s", r.status_code)
+            return
+
+        issues = r.json().get("issues", [])
+        if not issues:
+            logger.info("[startup] No stuck pipelines found.")
+            return
+
+        logger.info("[startup] Found %d in-progress tasks, checking for stuck stages...", len(issues))
+        for issue in issues:
+            issue_key = issue["key"]
+            summary = issue["fields"].get("summary", "")
+
+            # Skip PLAN: tasks — they don't have subtask stages
+            from config import PLAN_PREFIX
+            if summary.startswith(PLAN_PREFIX):
+                continue
+
+            # Re-trigger by creating a synthetic job (same as webhook would)
+            import uuid
+            job_id = str(uuid.uuid4())[:8]
+            job = {
+                "job_id": job_id,
+                "issue_key": issue_key,
+                "key": issue_key,
+                "parent_key": issue_key,
+                "summary": summary,
+                "description": issue["fields"].get("description", {}),
+                "description_text": "",
+                "issue_type": "Task",
+                "stage": None,
+                "trigger": TRIGGER_STATUS,
+                "jira_domain": f"{JIRA_DOMAIN}.atlassian.net",
+                "priority": "Medium",
+                "labels": [],
+                "components": [],
+                "status": "queued",
+                "created": time.time(),
+            }
+            with lock:
+                active_pipelines.add(issue_key)
+            _launch_job(job)
+            logger.info("[startup] Re-launched setup for %s (%s)", issue_key, summary)
+
+    except Exception as e:
+        logger.warning("[startup] Recovery failed (non-fatal): %s", e)
 
 
 # ── Telegram bot webhook ──────────────────────────────────────────────────────
