@@ -145,6 +145,8 @@ _RETRYABLE_MARKERS = (
     "502", "bad gateway",
     "503", "service unavailable",
     "529", "overloaded",
+    # Auth (token expired — refresh_token.py should handle, but retry just in case)
+    "401", "authentication_error", "token has expired",
     # Network / transient
     "connection error", "timeout", "econnreset", "econnrefused",
     "socket hang up", "fetch failed",
@@ -156,6 +158,13 @@ _RATE_LIMIT_MARKERS = ("rate limit", "429", "overloaded", "exceeded your current
 
 def _run_claude(prompt: str, work_dir: str, job: dict) -> subprocess.CompletedProcess:
     """Run Claude Code Opus via Popen; stores process in job["process"] for cancellation."""
+    # Refresh OAuth token before each run (non-blocking)
+    try:
+        from refresh_token import main as _refresh_token
+        _refresh_token()
+    except Exception:
+        pass
+
     proc = subprocess.Popen(
         [
             "claude", "-p", prompt,

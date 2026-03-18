@@ -56,5 +56,8 @@ cat > /root/.claude/settings.json << 'SETTINGS'
 SETTINGS
 echo "[entrypoint] Claude Code permissions configured (auto-approve all tools)."
 
+# ── Refresh OAuth token if needed ─────────────────────────────────────────────
+python refresh_token.py || echo "[entrypoint] Token refresh skipped or failed, continuing."
+
 # ── Start pipeline ────────────────────────────────────────────────────────────
 exec python main.py
