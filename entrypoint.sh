@@ -7,10 +7,9 @@ set -e
 # Option C (any server): set CLAUDE_AUTH_JSON=<base64 of ~/.claude dir tarball>
 #   Generate with: tar -czf - ~/.claude | base64 -w0
 
-if [ -f /root/.claude/.credentials.json ]; then
-    echo "[entrypoint] Found existing ~/.claude/.credentials.json (Railway Volume), skipping restore."
-elif [ -n "$CLAUDE_AUTH_JSON" ]; then
-    echo "[entrypoint] No credentials on volume, restoring from CLAUDE_AUTH_JSON..."
+# Env var always wins — it may be newer than what's on the volume
+if [ -n "$CLAUDE_AUTH_JSON" ]; then
+    echo "[entrypoint] Restoring credentials from CLAUDE_AUTH_JSON env var..."
     mkdir -p /root/.claude
     CLEAN_JSON=$(echo "$CLAUDE_AUTH_JSON" | tr -d '"'"'" )
     if echo "$CLEAN_JSON" | base64 -d > /root/.claude/.credentials.json 2>/dev/null; then
@@ -19,6 +18,8 @@ elif [ -n "$CLAUDE_AUTH_JSON" ]; then
     else
         echo "[entrypoint] WARNING: CLAUDE_AUTH_JSON decode failed."
     fi
+elif [ -f /root/.claude/.credentials.json ]; then
+    echo "[entrypoint] Using existing ~/.claude/.credentials.json from volume."
 else
     echo "[entrypoint] WARNING: No credentials found. Claude Code will not work."
 fi
