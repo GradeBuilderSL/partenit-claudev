@@ -7,11 +7,13 @@ expires, so the pipeline never gets 401 errors.
 Called from:
   - entrypoint.sh (on container start)
   - worker._run_claude() (before each Claude Code invocation)
+  - Background loop (every 30 min while container is alive)
 
 Non-blocking: if refresh fails, continues with existing token.
 """
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -99,6 +101,35 @@ def main() -> bool:
     remaining_new = (oauth["expiresAt"] - int(time.time() * 1000)) / 1000 / 60
     logger.info("Token refreshed, valid for %.0fm", remaining_new)
     return True
+
+
+BACKGROUND_INTERVAL_SEC = 1800  # 30 minutes
+_background_started = False
+
+
+def start_background_refresh() -> None:
+    """Start a daemon thread that refreshes the token every 30 minutes.
+
+    Safe to call multiple times — only starts once.
+    """
+    global _background_started
+    if _background_started:
+        return
+    _background_started = True
+
+    def _loop():
+        while True:
+            time.sleep(BACKGROUND_INTERVAL_SEC)
+            try:
+                refreshed = main()
+                if refreshed:
+                    logger.info("[bg] Token refreshed by background loop")
+            except Exception as e:
+                logger.debug("[bg] Token refresh failed: %s", e)
+
+    t = threading.Thread(target=_loop, daemon=True, name="token-refresh")
+    t.start()
+    logger.info("Background token refresh started (every %dm)", BACKGROUND_INTERVAL_SEC // 60)
 
 
 if __name__ == "__main__":

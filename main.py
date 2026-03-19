@@ -437,6 +437,16 @@ async def webhook_jira(request: Request, secret: str = "") -> Dict[str, Any]:
 # ── Startup recovery after redeploy ───────────────────────────────────────────
 
 @app.on_event("startup")
+def _start_token_refresh() -> None:
+    """Start background OAuth token refresh loop."""
+    try:
+        from refresh_token import start_background_refresh
+        start_background_refresh()
+    except Exception as e:
+        logger.warning("[startup] Failed to start token refresh: %s", e)
+
+
+@app.on_event("startup")
 def _startup_recovery() -> None:
     """Recover stuck pipelines after a redeploy.
 
